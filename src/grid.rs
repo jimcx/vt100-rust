@@ -600,6 +600,44 @@ impl Grid {
         }
     }
 
+    /// Marks the cursor's row as the start of a prompt.
+    pub fn mark_prompt(&mut self) {
+        self.current_row_mut().set_prompt_mark(true);
+    }
+
+    /// Drops everything above the last marked row (scrollback rows, and on
+    /// the visible screen the rows above it, shifting the rest up and the
+    /// cursor with them). Returns false, changing nothing, if no row is
+    /// marked.
+    pub fn clear_before_prompt(&mut self) -> bool {
+        if let Some(r) = self.rows.iter().rposition(|row| row.prompt_mark()) {
+            self.erase_all_scrollback(|_| {});
+            self.rows.rotate_left(r);
+            let len = self.rows.len();
+            for row in &mut self.rows[len - r..] {
+                row.reset();
+            }
+            // r < rows, so it fits
+            let r = r as u16;
+            self.pos.row = self.pos.row.saturating_sub(r);
+            self.saved_pos.row = self.saved_pos.row.saturating_sub(r);
+            return true;
+        }
+        let Some(scrollback) = &mut self.scrollback else {
+            return false;
+        };
+        let Some(i) = scrollback.rows.iter().rposition(|row| row.prompt_mark())
+        else {
+            return false;
+        };
+        scrollback.rows.drain(..i);
+        // Rows trimmed at capacity were above the mark too: what is left is
+        // all there would be with an unbounded scrollback.
+        scrollback.unbounded_len = scrollback.rows.len();
+        scrollback.offset = 0;
+        true
+    }
+
     pub fn erase_row(&mut self, attrs: crate::attrs::Attrs) {
         self.current_row_mut().clear(attrs);
     }

@@ -188,6 +188,24 @@ impl Screen {
         self.grid_mut().erase_all_scrollback(|_| {});
     }
 
+    /// Marks the cursor's row as the start of a shell prompt (what an
+    /// `OSC 133;A` says). The mark moves with the row as it scrolls into the
+    /// scrollback, and is lost when the row is cleared or trimmed from the
+    /// scrollback at capacity.
+    pub fn mark_prompt(&mut self) {
+        self.grid_mut().mark_prompt();
+    }
+
+    /// Drops everything above the last marked prompt row (see
+    /// [`Screen::mark_prompt`]): its scrollback above it and, if it is on the
+    /// visible screen, the rows above it too, so the marked row becomes the
+    /// first row and the cursor keeps its place relative to it. Returns the
+    /// scrollback position to the live viewport. Returns `false` and changes
+    /// nothing when no row is marked.
+    pub fn clear_before_prompt(&mut self) -> bool {
+        self.grid_mut().clear_before_prompt()
+    }
+
     /// Returns the current position in the scrollback.
     ///
     /// This position indicates the offset from the top of the screen, and is

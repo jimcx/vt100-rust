@@ -5,6 +5,8 @@ use alloc::{string::String, vec::Vec};
 pub struct Row {
     cells: Vec<crate::Cell>,
     wrapped: bool,
+    /// Whether a shell prompt starts on this row (see `Screen::mark_prompt`).
+    prompt_mark: bool,
 }
 
 impl Row {
@@ -12,6 +14,7 @@ impl Row {
         Self {
             cells: vec![crate::Cell::new(); usize::from(cols)],
             wrapped: false,
+            prompt_mark: false,
         }
     }
 
@@ -28,11 +31,13 @@ impl Row {
             cell.clear(attrs);
         }
         self.wrapped = false;
+        self.prompt_mark = false;
     }
 
     pub fn reset(&mut self) {
         self.cells.fill(crate::Cell::new());
         self.wrapped = false;
+        self.prompt_mark = false;
     }
 
     fn cells(&self) -> impl Iterator<Item = &crate::Cell> {
@@ -169,6 +174,14 @@ impl Row {
 
     pub fn wrapped(&self) -> bool {
         self.wrapped
+    }
+
+    pub fn set_prompt_mark(&mut self, mark: bool) {
+        self.prompt_mark = mark;
+    }
+
+    pub fn prompt_mark(&self) -> bool {
+        self.prompt_mark
     }
 
     pub fn clear_wide(&mut self, col: u16) {
