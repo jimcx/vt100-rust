@@ -22,6 +22,9 @@ struct ScrollbackState {
     /// The number of rows of scrollback there *would* be if the scrollback
     /// capacity were unlimited.
     unbounded_len: usize,
+    /// Total rows ever pushed into the scrollback: monotonic, unaffected by
+    /// the capacity, by clearing or by pulling rows back on a resize.
+    scrolled: u64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -39,6 +42,7 @@ impl Grid {
                 capacity,
                 offset: 0,
                 unbounded_len: 0,
+                scrolled: 0,
             }),
         };
         Self {
@@ -250,6 +254,10 @@ impl Grid {
 
     pub fn scrollback_capacity(&self) -> usize {
         self.scrollback.as_ref().map_or(0, |s| s.capacity)
+    }
+
+    pub fn scrolled_lines(&self) -> u64 {
+        self.scrollback.as_ref().map_or(0, |s| s.scrolled)
     }
 
     pub fn scrollback_len(&self) -> usize {
@@ -737,6 +745,8 @@ impl Grid {
         {
             scrollback.unbounded_len =
                 scrollback.unbounded_len.saturating_add(num_removed);
+            scrollback.scrolled =
+                scrollback.scrolled.saturating_add(num_removed as u64);
 
             // Number of rows that will be pushed to the scrollback.
             let num_pushed = count.min(scrollback.capacity);

@@ -157,6 +157,15 @@ impl Screen {
         self.grid().scrollback_len()
     }
 
+    /// Returns the total number of lines ever pushed into the main screen's
+    /// scrollback: monotonic, not reduced by the scrollback capacity, clearing
+    /// the scrollback or the alternate screen. Compare it before and after
+    /// processing output to learn how many lines that output scrolled.
+    #[must_use]
+    pub fn scrolled_lines(&self) -> u64 {
+        self.grid.scrolled_lines()
+    }
+
     /// Returns the maximum capacity of the scrollback.
     #[must_use]
     pub fn scrollback_capacity(&self) -> usize {

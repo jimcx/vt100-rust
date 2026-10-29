@@ -336,3 +336,21 @@ fn gen_nums(range: RangeInclusive<u8>, join: &str) -> String {
         .collect::<Vec<String>>()
         .join(join)
 }
+
+#[test]
+fn scrolled_lines_counts_past_the_capacity_and_clears() {
+    let mut parser = helpers::new(4, 10, 3);
+    assert_eq!(parser.screen().scrolled_lines(), 0);
+    parser.process(b"1\r\n2\r\n3\r\n4");
+    assert_eq!(parser.screen().scrolled_lines(), 0);
+    parser.process(b"\r\n5\r\n6");
+    assert_eq!(parser.screen().scrolled_lines(), 2);
+    parser.process(b"\r\n7\r\n8\r\n9\r\n10\r\n11");
+    assert_eq!(parser.screen().scrollback_len(), 3);
+    assert_eq!(parser.screen().scrolled_lines(), 7);
+    parser.screen_mut().clear_scrollback();
+    assert_eq!(parser.screen().scrolled_lines(), 7);
+    // The alternate screen has no scrollback and leaves the count alone.
+    parser.process(b"\x1b[?1049h\r\na\r\nb\r\nc\r\nd\r\ne\x1b[?1049l");
+    assert_eq!(parser.screen().scrolled_lines(), 7);
+}
