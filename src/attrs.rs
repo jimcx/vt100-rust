@@ -35,6 +35,47 @@ impl Default for Attrs {
     }
 }
 
+#[cfg(feature = "compress")]
+impl Color {
+    fn encode(self, out: &mut alloc::vec::Vec<u8>) {
+        match self {
+            Self::Default => out.push(0),
+            Self::Idx(i) => out.extend_from_slice(&[1, i]),
+            Self::Rgb(r, g, b) => out.extend_from_slice(&[2, r, g, b]),
+        }
+    }
+
+    fn decode(data: &[u8], pos: &mut usize) -> Option<Self> {
+        let tag = *data.get(*pos)?;
+        *pos += 1;
+        let (color, n) = match tag {
+            0 => (Self::Default, 0),
+            1 => (Self::Idx(*data.get(*pos)?), 1),
+            2 => (Self::Rgb(*data.get(*pos)?, *data.get(*pos + 1)?, *data.get(*pos + 2)?), 3),
+            _ => return None,
+        };
+        *pos += n;
+        Some(color)
+    }
+}
+
+#[cfg(feature = "compress")]
+impl Attrs {
+    pub(crate) fn encode(&self, out: &mut alloc::vec::Vec<u8>) {
+        self.fgcolor.encode(out);
+        self.bgcolor.encode(out);
+        out.push(self.mode);
+    }
+
+    pub(crate) fn decode(data: &[u8], pos: &mut usize) -> Option<Self> {
+        let fgcolor = Color::decode(data, pos)?;
+        let bgcolor = Color::decode(data, pos)?;
+        let mode = *data.get(*pos)?;
+        *pos += 1;
+        Some(Self { fgcolor, bgcolor, mode })
+    }
+}
+
 impl Attrs {
     pub const fn new() -> Self {
         Self {

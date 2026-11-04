@@ -19,6 +19,7 @@ itoa = "1.0.18"
 unicode-width = "0.2.2"
 vte = { version = "0.15.0", default-features = false }
 embedded-io = { version = "0.7.1", optional = true }
+zstd = { version = "0.13.3", optional = true }
 
 [dev-dependencies]
 nix = { version = "0.31.3", features = ["term"] }
@@ -31,3 +32,6 @@ terminal_size = "0.4.4"
 [features]
 default = ["std"]
 std = ["vte/std"]
+# Scrollback rows far from the viewport can be kept zstd-compressed
+# (`Screen::set_scrollback_compression`).
+compress = ["std", "dep:zstd"]

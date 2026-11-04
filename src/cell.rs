@@ -29,6 +29,27 @@ impl PartialEq<Self> for Cell {
     }
 }
 
+#[cfg(feature = "compress")]
+impl Cell {
+    /// Appends a compact encoding of the cell (see `decode`).
+    pub(crate) fn encode(&self, out: &mut Vec<u8>) {
+        out.push(self.len);
+        out.extend_from_slice(&self.contents[..self.len()]);
+        self.attrs.encode(out);
+    }
+
+    pub(crate) fn decode(data: &[u8], pos: &mut usize) -> Option<Self> {
+        let mut cell = Self::new();
+        cell.len = *data.get(*pos)?;
+        *pos += 1;
+        let len = cell.len();
+        cell.contents[..len].copy_from_slice(data.get(*pos..*pos + len)?);
+        *pos += len;
+        cell.attrs = crate::attrs::Attrs::decode(data, pos)?;
+        Some(cell)
+    }
+}
+
 impl Cell {
     pub(crate) const DEFAULT: Self = Self::new();
 

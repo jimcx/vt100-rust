@@ -25,6 +25,73 @@ struct ScrollbackState {
     /// Total rows ever pushed into the scrollback: monotonic, unaffected by
     /// the capacity, by clearing or by pulling rows back on a resize.
     scrolled: u64,
+    /// The oldest rows, compressed: `Some` when compression is on. The scrollback is these, then
+    /// `rows`; the viewport only reads `rows` (`offset <= rows.len()` always).
+    #[cfg(feature = "compress")]
+    cold: Option<crate::cold::Cold>,
+}
+
+impl ScrollbackState {
+    /// All the rows there are: compressed and plain.
+    fn total_len(&self) -> usize {
+        #[cfg(feature = "compress")]
+        if let Some(cold) = &self.cold {
+            return cold.len() + self.rows.len();
+        }
+        self.rows.len()
+    }
+
+    /// Drops the `n` oldest rows, calling `on_row` for the plain ones (compressed rows are not
+    /// reported).
+    fn evict(&mut self, mut n: usize, on_row: &mut impl FnMut(&crate::row::Row)) {
+        #[cfg(feature = "compress")]
+        if let Some(cold) = &mut self.cold {
+            let from_cold = n.min(cold.len());
+            cold.evict(from_cold);
+            n -= from_cold;
+        }
+        for row in self.rows.drain(0..n.min(self.rows.len())) {
+            on_row(&row);
+        }
+    }
+
+    /// Makes at least `n` rows plain (the newest ones), as far as there are that many.
+    fn thaw_to(&mut self, n: usize) {
+        #[cfg(feature = "compress")]
+        if let Some(cold) = &mut self.cold {
+            while self.rows.len() < n {
+                let Some(rows) = cold.thaw() else { break };
+                for row in rows.into_iter().rev() {
+                    self.rows.push_front(row);
+                }
+            }
+        }
+        #[cfg(not(feature = "compress"))]
+        let _ = n;
+    }
+
+    /// Compresses the plain rows the viewport (at `offset`, `screen_rows` tall) is far from.
+    fn freeze(&mut self, screen_rows: usize) {
+        #[cfg(feature = "compress")]
+        if let Some(cold) = &mut self.cold {
+            while crate::cold::can_freeze(self.rows.len(), self.offset, screen_rows) {
+                cold.freeze(self.rows.drain(..crate::cold::FREEZE_ROWS));
+            }
+        }
+        #[cfg(not(feature = "compress"))]
+        let _ = screen_rows;
+    }
+
+    /// Every row, oldest first, for output that reads all of them.
+    fn all_rows(&self) -> alloc::vec::Vec<crate::row::Row> {
+        #[cfg(feature = "compress")]
+        if let Some(cold) = &self.cold {
+            let mut all = cold.all_rows();
+            all.extend(self.rows.iter().cloned());
+            return all;
+        }
+        self.rows.iter().cloned().collect()
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -43,6 +110,8 @@ impl Grid {
                 offset: 0,
                 unbounded_len: 0,
                 scrolled: 0,
+                #[cfg(feature = "compress")]
+                cold: None,
             }),
         };
         Self {
@@ -115,6 +184,7 @@ impl Grid {
             let num_pulled = u16::try_from(scrollback.unbounded_len)
                 .unwrap_or(u16::MAX)
                 .min(diff);
+            scrollback.thaw_to(num_pulled.into());
             // Number of rows actually pulled from scrollback.
             let num_pulled_scrollback =
                 scrollback.rows.len().min(num_pulled.into());
@@ -261,7 +331,7 @@ impl Grid {
     }
 
     pub fn scrollback_len(&self) -> usize {
-        self.scrollback.as_ref().map_or(0, |s| s.rows.len())
+        self.scrollback.as_ref().map_or(0, ScrollbackState::total_len)
     }
 
     pub fn scrollback(&self) -> usize {
@@ -286,8 +356,30 @@ impl Grid {
         let Some(scrollback) = &mut self.scrollback else {
             return;
         };
-        scrollback.offset = rows.min(scrollback.rows.len());
+        scrollback.offset = rows.min(scrollback.total_len());
+        scrollback.thaw_to(scrollback.offset);
         Self::grow_visible_scrollback(scrollback, self.size);
+        scrollback.freeze(self.size.rows().into());
+    }
+
+    /// Turns compression of the old scrollback rows on or off.
+    #[cfg(feature = "compress")]
+    pub fn set_scrollback_compression(&mut self, on: bool) {
+        let Some(scrollback) = &mut self.scrollback else {
+            return;
+        };
+        if on {
+            scrollback.cold.get_or_insert_with(Default::default);
+            scrollback.freeze(self.size.rows().into());
+        } else {
+            scrollback.thaw_to(usize::MAX);
+            scrollback.cold = None;
+        }
+    }
+
+    #[cfg(feature = "compress")]
+    pub fn scrollback_compressed(&self) -> bool {
+        self.scrollback.as_ref().is_some_and(|s| s.cold.is_some())
     }
 
     pub fn write_contents(&self, contents: &mut String) {
@@ -359,7 +451,7 @@ impl Grid {
         match range {
             crate::capture::BasicFormattedCaptureRange::Full(state) => {
                 if let Some(scrollback) = &self.scrollback {
-                    write(scrollback.rows.iter(), writer, state)?;
+                    write(scrollback.all_rows().iter(), writer, state)?;
                 }
                 write(self.rows.iter(), writer, state)
             }
@@ -603,6 +695,10 @@ impl Grid {
             for row in scrollback.rows.drain(..) {
                 on_row(&row);
             }
+            #[cfg(feature = "compress")]
+            if let Some(cold) = &mut scrollback.cold {
+                cold.clear();
+            }
             scrollback.unbounded_len = 0;
             scrollback.offset = 0;
         }
@@ -634,11 +730,21 @@ impl Grid {
         let Some(scrollback) = &mut self.scrollback else {
             return false;
         };
-        let Some(i) = scrollback.rows.iter().rposition(|row| row.prompt_mark())
-        else {
+        let mut mark = scrollback.rows.iter().rposition(|row| row.prompt_mark());
+        #[cfg(feature = "compress")]
+        if mark.is_none() && scrollback.cold.as_ref().is_some_and(crate::cold::Cold::has_marks) {
+            scrollback.thaw_to(usize::MAX);
+            mark = scrollback.rows.iter().rposition(|row| row.prompt_mark());
+        }
+        let Some(i) = mark else {
             return false;
         };
         scrollback.rows.drain(..i);
+        #[cfg(feature = "compress")]
+        if let Some(cold) = &mut scrollback.cold {
+            // Anything still compressed is above the mark.
+            cold.clear();
+        }
         // Rows trimmed at capacity were above the mark too: what is left is
         // all there would be with an unbounded scrollback.
         scrollback.unbounded_len = scrollback.rows.len();
@@ -753,11 +859,9 @@ impl Grid {
 
             // Scrollback length is capped at `scrollback.capacity`. These rows
             // will be lost, so just remove them now to avoid allocating.
-            let scrollback_overflow = (scrollback.rows.len() + num_pushed)
+            let scrollback_overflow = (scrollback.total_len() + num_pushed)
                 .saturating_sub(scrollback.capacity);
-            for row in scrollback.rows.drain(0..scrollback_overflow) {
-                on_row(&row);
-            }
+            scrollback.evict(scrollback_overflow, &mut on_row);
 
             // Number of rows that will simply be reset rather than pushed to
             // the scrollback.
@@ -782,6 +886,7 @@ impl Grid {
                     .min(scrollback.rows.len());
             }
             Self::grow_visible_scrollback(scrollback, self.size);
+            scrollback.freeze(self.size.rows().into());
         } else {
             for row in &mut between[..num_removed] {
                 if scrollback_enabled {

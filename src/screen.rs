@@ -172,6 +172,21 @@ impl Screen {
         self.grid().scrollback_capacity()
     }
 
+    /// Turns compression of old scrollback rows on or off (feature `compress`). With it on, rows
+    /// well away from the viewport are kept zstd-compressed and decompressed when the viewport
+    /// (`set_scrollback`) or an operation reaches them. Rows that fall off the capacity while
+    /// compressed are not reported to the `on_row` callback.
+    #[cfg(feature = "compress")]
+    pub fn set_scrollback_compression(&mut self, on: bool) {
+        self.grid.set_scrollback_compression(on);
+    }
+
+    /// Whether old scrollback rows are being compressed.
+    #[cfg(feature = "compress")]
+    pub fn scrollback_compressed(&self) -> bool {
+        self.grid.scrollback_compressed()
+    }
+
     /// Scrolls to the given position in the scrollback.
     ///
     /// This position indicates the offset from the top of the screen, and
@@ -1233,10 +1248,14 @@ impl<CB: crate::Callbacks> WrappedScreen<CB> {
 
     // ESC c
     pub fn ris(&mut self) {
+        #[cfg(feature = "compress")]
+        let compressed = self.screen.grid.scrollback_compressed();
         self.screen = Screen::new(
             self.screen.grid.size(),
             self.screen.grid.scrollback_capacity(),
         );
+        #[cfg(feature = "compress")]
+        self.screen.grid.set_scrollback_compression(compressed);
     }
 
     // csi codes

@@ -9,6 +9,29 @@ pub struct Row {
     prompt_mark: bool,
 }
 
+#[cfg(feature = "compress")]
+impl Row {
+    /// Appends a compact encoding of the row (see `decode`).
+    pub(crate) fn encode(&self, out: &mut Vec<u8>) {
+        out.push(u8::from(self.wrapped) | u8::from(self.prompt_mark) << 1);
+        out.extend_from_slice(&u16::try_from(self.cells.len()).unwrap_or(u16::MAX).to_le_bytes());
+        for cell in &self.cells {
+            cell.encode(out);
+        }
+    }
+
+    pub(crate) fn decode(data: &[u8], pos: &mut usize) -> Option<Self> {
+        let flags = *data.get(*pos)?;
+        let n = u16::from_le_bytes([*data.get(*pos + 1)?, *data.get(*pos + 2)?]);
+        *pos += 3;
+        let mut cells = Vec::with_capacity(usize::from(n));
+        for _ in 0..n {
+            cells.push(crate::Cell::decode(data, pos)?);
+        }
+        Some(Self { cells, wrapped: flags & 1 != 0, prompt_mark: flags & 2 != 0 })
+    }
+}
+
 impl Row {
     pub fn new(cols: u16) -> Self {
         Self {

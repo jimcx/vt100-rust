@@ -55,6 +55,8 @@ mod attrs;
 mod callbacks;
 pub mod capture;
 mod cell;
+#[cfg(feature = "compress")]
+mod cold;
 mod grid;
 mod parser;
 mod perform;
