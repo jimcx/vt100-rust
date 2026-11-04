@@ -67,7 +67,9 @@ impl Cold {
         let mut raw = Vec::new();
         let mut n = 0;
         let mut marked = false;
-        for row in rows {
+        for mut row in rows {
+            // Rows the viewport widened to the screen's width go back to their text.
+            row.trim();
             marked |= row.prompt_mark();
             row.encode(&mut raw);
             n += 1;
